@@ -8,12 +8,12 @@ Vibe-coded with claude code ;)
 Install the python module [bleak](https://bleak.readthedocs.io/en/latest/)
 
 ```
-$ pip install bleak
+$ pip install bleak pycryptodome
 ```
 
 or globally for all users (maybe also required on Raspberry Pi OS)
 ```
-sudo apt install python3-bleak
+sudo apt install python3-bleak python3-pycryptodome
 ```
 
 ## Help

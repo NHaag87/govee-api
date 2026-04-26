@@ -12,7 +12,7 @@ import sys
 from datetime import datetime, timedelta
 
 from bleak import AdvertisementData, BleakClient, BleakScanner, BLEDevice
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from Crypto.Cipher import AES
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ def _rc4(key: bytes, data: bytes) -> bytes:
 def _safe_decrypt(data: bytes, key: bytes) -> bytes:
     out = bytearray()
     for i in range(len(data) // 16):
-        out += Cipher(algorithms.AES(key), modes.ECB()).decryptor().update(data[i*16:(i+1)*16])
+        out += AES.new(key, AES.MODE_ECB).decrypt(data[i*16:(i+1)*16])
     if len(data) % 16:
         out += _rc4(key, data[(len(data) // 16) * 16:])
     return bytes(out)
@@ -87,7 +87,7 @@ def _safe_decrypt(data: bytes, key: bytes) -> bytes:
 def _safe_encrypt(data: bytes, key: bytes) -> bytes:
     out = bytearray()
     for i in range(len(data) // 16):
-        out += Cipher(algorithms.AES(key), modes.ECB()).encryptor().update(data[i*16:(i+1)*16])
+        out += AES.new(key, AES.MODE_ECB).encrypt(data[i*16:(i+1)*16])
     if len(data) % 16:
         out += _rc4(key, data[(len(data) // 16) * 16:])
     return bytes(out)
