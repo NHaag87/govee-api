@@ -1,6 +1,6 @@
-# govee-h5075-thermo-hygrometer
+# Govee Python API fpor H5075 and H5105 hygrometers
 
-Shell script and python lib for Govee H5075 thermometer / hygrometer for Linux, Raspberry Pis and Windows.
+Python lib for Govee H5105 and H5075 thermometer / hygrometer for Linux, Raspberry Pis and Windows. Forked from [govee-h5075-thermo-hygrometer](https://github.com/Heckie75/govee-h5075-thermo-hygrometer).
 
 ## Preconditions
 Install the python module [bleak](https://bleak.readthedocs.io/en/latest/)
