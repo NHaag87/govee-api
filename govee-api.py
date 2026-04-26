@@ -1410,9 +1410,14 @@ async def download_history(label: str, n_samples: int, _json: bool = False) -> N
     if _json:
         print(json.dumps([m.to_dict() for m in records], indent=2))
     else:
+        print("Timestamp         Temperature  Dew point  Temperature  Dew point  "
+              "Rel. humidity  Abs. humidity  Steam pressure", flush=True)
         for m in records:
-            print(f"{m.timestamp.strftime('%Y-%m-%d %H:%M')}  "
-                  f"{m.temperatureC:6.1f} °C  {m.relHumidity:5.1f} %")
+            timestamp = m.timestamp.strftime("%Y-%m-%d %H:%M")
+            print(f"{timestamp}  {m.temperatureC:.1f}°C       {m.dewPointC:.1f}°C     "
+                  f"{m.temperatureF:.1f}°F       {m.dewPointF:.1f}°F     "
+                  f"{m.relHumidity:.1f}%          {m.absHumidity:.1f} g/m³      "
+                  f"{m.steamPressure:.1f} mbar", flush=True)
 
 
 async def recorded_data(label: str, start: str, end: str, _json: bool = False):
