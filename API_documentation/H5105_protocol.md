@@ -289,7 +289,7 @@ always produces the same ciphertext.
 ### 7.2 Encryption and Decryption
 
 ```python
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from Cryptodome.Cipher import AES
 
 def rc4(key: bytes, data: bytes) -> bytes:
     """RC4 with fresh S-box on every call."""
@@ -309,21 +309,18 @@ def rc4(key: bytes, data: bytes) -> bytes:
 
 def encrypt_packet(plaintext: bytes, session_key: bytes) -> bytes:
     """Encrypt a 20-byte plaintext packet."""
-    cipher = Cipher(algorithms.AES(session_key), modes.ECB())
-    encrypted = cipher.encryptor().update(plaintext[0:16])
+    encrypted = AES.new(session_key, AES.MODE_ECB).encrypt(plaintext[0:16])
     return encrypted + rc4(session_key, plaintext[16:20])
 
 def decrypt_packet(ciphertext: bytes, session_key: bytes) -> bytes:
     """Decrypt a 20-byte ciphertext packet."""
-    cipher = Cipher(algorithms.AES(session_key), modes.ECB())
-    decrypted = cipher.decryptor().update(ciphertext[0:16])
+    decrypted = AES.new(session_key, AES.MODE_ECB).decrypt(ciphertext[0:16])
     return decrypted + rc4(session_key, ciphertext[16:20])
 ```
 
 ### 7.3 Pre-Shared Key (PSK)
 
-The Govee Home app contains a hardcoded 16-byte PSK, extracted from
-`resources.arsc` in the APK (`classes13.dex`, package `com.govee.encryp.ble`):
+The Govee Home app contains a hardcoded 16-byte PSK:
 
 ```python
 PSK = b"MakingLifeSmarte"  # 16 bytes
@@ -341,7 +338,7 @@ def derive_session_key(auth_rx1: bytes) -> bytes:
     """Derive the 16-byte AES session key from the 20-byte RX1 auth response."""
     # Decrypt RX1 using PSK: AES-ECB-DECRYPT for bytes 0-15, RC4 for bytes 16-19
     decrypted = (
-        Cipher(algorithms.AES(PSK), modes.ECB()).decryptor().update(auth_rx1[0:16])
+        AES.new(PSK, AES.MODE_ECB).decrypt(auth_rx1[0:16])
         + rc4(PSK, auth_rx1[16:20])
     )
     # Verify magic header: e7 01
@@ -350,24 +347,20 @@ def derive_session_key(auth_rx1: bytes) -> bytes:
     return decrypted[2:18]
 ```
 
-This was reverse-engineered from `Controller4Aes$Companion.g()` in the APK DEX.
-The function `Safe$Companion.b(originBytes, key)` performs AES-ECB-DECRYPT for
-full 16-byte blocks and RC4 for any partial remainder.
+The encryption scheme applies AES-ECB-DECRYPT for full 16-byte blocks and RC4
+for any partial remainder.
 
 ### 7.5 Auth Handshake Details
 
 The app performs the auth handshake as follows:
 
-1. **TX1** (write to AUTH_WRITE): `Safe$Companion.b(PSK, [0xe7, 0x01, <14 random bytes>])` + RC4 tail (bytes 16-18) + BCC checksum (byte 19)
+1. **TX1** (write to AUTH_WRITE): `encrypt_packet(PSK, [0xe7, 0x01, <18 random bytes>])` — a full 20-byte encrypted packet
 2. **RX1** (notify on AUTH_NOTIFY): device's encrypted challenge response — used to derive session key
-3. **TX2** (write to AUTH_WRITE): `Safe$Companion.b(PSK, [0xe7, 0x02, <derived bytes>])` + RC4 tail + BCC
+3. **TX2** (write to AUTH_WRITE): `encrypt_packet(PSK, [0xe7, 0x02, <18 random bytes>])` — a full 20-byte encrypted packet
 4. **RX2** (notify on AUTH_NOTIFY): device confirmation
 
-Note: On the wire, TX1 and TX2 are `AES-ECB-ENCRYPT(PSK, plaintext[0:16]) + RC4(PSK, plaintext[16:20])`.
-The APK source uses `Safe$Companion.b()` (AES-ECB-DECRYPT direction), which appears
-inverted, but the net result is equivalent to `safe_encrypt` as defined in §7.2.
-The nonce in bytes 2-18 is generated randomly by the client each session; the device
-does not validate it, only uses it to derive the shared session key.
+The nonce bytes (2–19) are generated randomly by the client each session; the device
+does not validate them, only uses them to derive the shared session key.
 
 ---
 
