@@ -12,7 +12,7 @@ import sys
 from datetime import datetime, timedelta
 
 from bleak import AdvertisementData, BleakClient, BleakScanner, BLEDevice
-from Crypto.Cipher import AES
+from Cryptodome.Cipher import AES
 
 
 # ---------------------------------------------------------------------------
