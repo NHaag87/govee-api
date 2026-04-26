@@ -1385,43 +1385,15 @@ async def device_info(label: str, _json: bool = False) -> None:
             print(str(device))
 
 
-async def download_history(label: str, n_samples: int, _json: bool = False) -> None:
-    """Download historical records from an H5105 device."""
-    mac = alias.resolve(label=label)
-    if not mac:
-        LOGGER.error(f"Unable to resolve alias or mac {label}. Pls. check ~/.known_govees")
-        return
+async def historical_data(label: str, start: str, end: str, _json: bool = False) -> None:
+    """Download historical records from any supported device.
 
-    device = GoveeH5105(mac)
-    try:
-        await device.connect()
-        await device._auth_handshake()
-        records = await device.downloadHistory(n_samples)
-    except Exception as e:
-        LOGGER.error(f"{mac}: history download failed: {e}")
-        records = []
-    finally:
-        await device.disconnect()
-
-    if not records:
-        print(f"No history records received from {mac}.", file=sys.stderr)
-        return
-
-    if _json:
-        print(json.dumps([m.to_dict() for m in records], indent=2))
-    else:
-        print("Timestamp         Temperature  Dew point  Temperature  Dew point  "
-              "Rel. humidity  Abs. humidity  Steam pressure", flush=True)
-        for m in records:
-            timestamp = m.timestamp.strftime("%Y-%m-%d %H:%M")
-            print(f"{timestamp}  {m.temperatureC:.1f}°C       {m.dewPointC:.1f}°C     "
-                  f"{m.temperatureF:.1f}°F       {m.dewPointF:.1f}°F     "
-                  f"{m.relHumidity:.1f}%          {m.absHumidity:.1f} g/m³      "
-                  f"{m.steamPressure:.1f} mbar", flush=True)
-
-
-async def recorded_data(label: str, start: str, end: str, _json: bool = False):
-    """Download historical records from an H507x / H5179 device."""
+    The device model is detected automatically from a BLE advertisement scan.
+    For H5105 (encrypted GATT): --start is interpreted as a sample count
+      (e.g. --start 60 downloads the last 60 minutes); --end is ignored.
+    For H507x / H5179 (plaintext GATT): --start and --end are time expressions
+      in hhh:mm format (e.g. 0:10 = 10 minutes ago).
+    """
 
     def parseTimeStr(s: str) -> int:
         a = s.split(":")
@@ -1431,43 +1403,77 @@ async def recorded_data(label: str, start: str, end: str, _json: bool = False):
         t_delta = datetime.now() - datetime(year=1970, month=1, day=1)
         return int(t_delta.total_seconds() / 60) - minutes_before_now
 
-    try:
-        mac = alias.resolve(label=label)
-        device = GoveeThermometerHygrometer(mac)
-        await device.connect()
-        await device.requestDeviceName()
-        device_type = device.model
-        if device_type == "H5179":
-            start = get_1970_offset(parseTimeStr(start)) if start else get_1970_offset(60)
-            end = get_1970_offset(parseTimeStr(end)) if end else get_1970_offset(0)
-            starttime = start if start < end else end
-            endtime = end if end > start else start
-        else:
-            start = min(parseTimeStr(start) if start else 60, 28800)
-            end = min(parseTimeStr(end) if end else 0, 28800)
-            starttime = start if start > end else end
-            endtime = end if end < start else start
-        LOGGER.debug(f"Device type: {device_type}, start: {str(start)}, end: {str(end)}")
-        await device.requestHumidityOffset()
-        await device.requestTemperatureOffset()
-        measurements = await device.requestRecordedData(
-            start=starttime, end=endtime, device_type=device_type)
-        if _json:
-            print(json.dumps([m.to_dict() for m in measurements], indent=2))
-        else:
-            print("Timestamp         Temperature  Dew point  Temperature  Dew point  "
-                  "Rel. humidity  Abs. humidity  Steam pressure", flush=True)
-            for m in measurements:
-                timestamp = m.timestamp.strftime("%Y-%m-%d %H:%M")
-                print(f"{timestamp}  {m.temperatureC:.1f}°C       {m.dewPointC:.1f}°C     "
-                      f"{m.temperatureF:.1f}°F       {m.dewPointF:.1f}°F     "
-                      f"{m.relHumidity:.1f}%          {m.absHumidity:.1f} g/m³      "
-                      f"{m.steamPressure:.1f} mbar", flush=True)
+    def print_records(records):
+        print("Timestamp         Temperature  Dew point  Temperature  Dew point  "
+              "Rel. humidity  Abs. humidity  Steam pressure", flush=True)
+        for m in records:
+            timestamp = m.timestamp.strftime("%Y-%m-%d %H:%M")
+            print(f"{timestamp}  {m.temperatureC:.1f}°C       {m.dewPointC:.1f}°C     "
+                  f"{m.temperatureF:.1f}°F       {m.dewPointF:.1f}°F     "
+                  f"{m.relHumidity:.1f}%          {m.absHumidity:.1f} g/m³      "
+                  f"{m.steamPressure:.1f} mbar", flush=True)
 
-    except Exception as e:
-        LOGGER.error(f"An exception has occurred: {str(e)}")
-    finally:
-        await device.disconnect()
+    mac = alias.resolve(label=label)
+    if not mac:
+        LOGGER.error(f"Unable to resolve alias or mac {label}. Pls. check ~/.known_govees")
+        return
+
+    LOGGER.info(f"{mac}: scanning for advertisement to detect model...")
+    name, _battery, _adv = await _scan_one(mac=mac)
+
+    if _is_h5105_name(name):
+        # H5105: --start is a sample count, --end is ignored
+        n_samples = parseTimeStr(start) if start else 60
+        device = GoveeH5105(mac)
+        try:
+            await device.connect()
+            await device._auth_handshake()
+            records = await device.downloadHistory(n_samples)
+        except Exception as e:
+            LOGGER.error(f"{mac}: history download failed: {e}")
+            records = []
+        finally:
+            await device.disconnect()
+
+        if not records:
+            print(f"No history records received from {mac}.", file=sys.stderr)
+            return
+
+        if _json:
+            print(json.dumps([m.to_dict() for m in records], indent=2))
+        else:
+            print_records(records)
+
+    else:
+        # H507x / H5179: --start and --end are time window expressions
+        try:
+            device = GoveeThermometerHygrometer(mac)
+            await device.connect()
+            await device.requestDeviceName()
+            device_type = device.model
+            if device_type == "H5179":
+                start_t = get_1970_offset(parseTimeStr(start)) if start else get_1970_offset(60)
+                end_t = get_1970_offset(parseTimeStr(end)) if end else get_1970_offset(0)
+                starttime = min(start_t, end_t)
+                endtime = max(start_t, end_t)
+            else:
+                start_t = min(parseTimeStr(start) if start else 60, 28800)
+                end_t = min(parseTimeStr(end) if end else 0, 28800)
+                starttime = max(start_t, end_t)
+                endtime = min(start_t, end_t)
+            LOGGER.debug(f"Device type: {device_type}, start: {starttime}, end: {endtime}")
+            await device.requestHumidityOffset()
+            await device.requestTemperatureOffset()
+            measurements = await device.requestRecordedData(
+                start=starttime, end=endtime, device_type=device_type)
+            if _json:
+                print(json.dumps([m.to_dict() for m in measurements], indent=2))
+            else:
+                print_records(measurements)
+        except Exception as e:
+            LOGGER.error(f"An exception has occurred: {str(e)}")
+        finally:
+            await device.disconnect()
 
 
 async def configure_device(label: str, humidityAlarm: str = None, temperatureAlarm: str = None,
@@ -1555,22 +1561,18 @@ def arg_parse(args: 'list[str]') -> dict:
                         help='request device information and configuration for given '
                              'MAC address or alias',
                         action='store_true')
-    # H5105-specific history download
-    parser.add_argument('-d', '--download',
-                        help='download N historical samples via GATT (H5105, requires auth)',
-                        type=int, metavar='N')
-    # H507x / H5179 history download
-    parser.add_argument('--data',
-                        help='request recorded data for given MAC address or alias '
-                             '(H5074 / H5075 / H5179)',
+    parser.add_argument('-d', '--data',
+                        help='request historical data. Device model is detected automatically. '
+                             'For H5074/H5075/H5179: use --start/--end as time expressions '
+                             '(e.g. 0:10 = last 10 minutes). '
+                             'For H5105: --start is a sample count (e.g. 60 = last 60 minutes).',
                         action='store_true')
-    parser.add_argument('--start', metavar="<hhh:mm>",
-                        help='request recorded data from start time expression, '
-                             'e.g. 480:00 (max. 20 days)',
+    parser.add_argument('--start', metavar="<hhh:mm|N>",
+                        help='H507x/H5179: start of time window (e.g. 480:00, max. 20 days); '
+                             'H5105: number of samples to download (default: 60)',
                         type=str, default=None)
     parser.add_argument('--end', metavar="<hhh:mm>",
-                        help='request recorded data to end time expression, '
-                             'e.g. 480:00 (max. 20 days)',
+                        help='H507x/H5179: end of time window (e.g. 0:00); ignored for H5105',
                         type=str, default=None)
     # Configuration (H507x / H5179 only)
     parser.add_argument('--set-humidity-alarm',
@@ -1616,19 +1618,15 @@ if __name__ == '__main__':
             elif args.measure:
                 measure()
 
-            elif not args.address and (args.status or args.info or args.download or args.data
+            elif not args.address and (args.status or args.info or args.data
                                        or args.set_humidity_alarm or args.set_temperature_alarm
                                        or args.set_humidity_offset or args.set_temperature_offset):
                 print("This operation requires to pass MAC address or alias",
                       file=sys.stderr, flush=True)
 
-            elif args.download:
-                asyncio.run(download_history(label=args.address, n_samples=args.download,
-                                             _json=args.json))
-
             elif args.data:
-                asyncio.run(recorded_data(label=args.address, start=args.start,
-                                          end=args.end, _json=args.json))
+                asyncio.run(historical_data(label=args.address, start=args.start,
+                                            end=args.end, _json=args.json))
 
             elif args.set_humidity_alarm or args.set_temperature_alarm \
                     or args.set_humidity_offset is not None \
